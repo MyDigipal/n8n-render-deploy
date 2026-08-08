@@ -1,38 +1,58 @@
-# Use this Blueprint to deploy n8n on Render as a web
-# service that uses a Postgres database to store
-# workflow data.
+# Blueprint de deploiement de n8n sur Render (service web + base Postgres).
 #
-# This Blueprint uses free instance types (specified by
-# `plan`) for both the web service and the database. You
-# can upgrade to paid instance types at any time to
-# increase resources.
+# ATTENTION : ce fichier est un PLAN, pas un miroir de la production. Render ne
+# le met JAMAIS a jour quand on change un reglage dans le tableau de bord. C'est
+# l'inverse qui se produit : une synchronisation ECRASE le tableau de bord avec
+# ce que dit ce fichier. Toute modification de la production doit donc etre
+# reportee ici, sinon ce fichier devient un piege.
+#
+# 08/08/2026 - remis en accord avec la production. Il etait reste tel quel depuis
+# sa creation le 04/08/2025 (image `latest`, service et base en plan gratuit)
+# alors que la realite avait diverge : plan standard pour le service, base
+# payante de 5 Go, image epinglee. Une synchronisation aurait donc tente de
+# redescendre la base en plan gratuit et de remettre l'image sur `latest`.
+# Auto Sync est passe a No cote Render le meme jour : plus rien ne part tout
+# seul, une synchronisation ne peut plus etre que manuelle et volontaire.
 
 services:
   - type: web
-    plan: free
-    # This is the runtime for services that pull a prebuilt Docker image
-    runtime: image
-    # You can give the service any name
     name: n8n-service
-    image:
-      # Pulls the n8n image tagged as latest from Docker Hub
-      url: docker.io/n8nio/n8n:latest
+    runtime: image
+    region: oregon
+    plan: standard
 
-    # All environment variables defined below are required!
+    image:
+      # TOUJOURS epingler une version, ne jamais revenir a `latest` ni `stable`.
+      # Chez n8n ces tags ne designent PAS le numero le plus eleve (au 07/08/2026,
+      # latest == stable == 2.33.6 alors que next == 2.34.3), et surtout leur
+      # contenu change a chaque sortie. C'est ce qui a provoque la montee de
+      # version subie du 13/04/2026, que personne n'avait demandee.
+      url: docker.io/n8nio/n8n:2.33.6
+
+    # Le service ne se redeploie pas sur un commit : les montees de version sont
+    # decidees, jamais subies.
+    autoDeployTrigger: "off"
+
+    # Les variables ci-dessous restent declarees ici parce qu'elles decrivent
+    # correctement la production, mais elles ont AUSSI ete posees en dur sur le
+    # service le 07/08/2026, et c'est desormais cela qui fait foi.
     #
-    # You can define additional environment variables as needed.
+    # Pourquoi : tant qu'elles n'existaient QUE dans ce Blueprint, elles n'etaient
+    # resolues qu'au moment d'une synchronisation, pas a chaque deploiement. Un
+    # deploiement declenche par API redemarrait donc le service SANS elles, et
+    # n8n ne plantait pas pour autant : il repartait en silence sur une base
+    # SQLite vierge, avec l'ecran /setup et une API publique en 401. C'est la
+    # panne de 35 minutes du 07/08/2026. La base Postgres n'avait pas ete touchee,
+    # un rollback Render a suffi a tout retrouver.
+    #
+    # NE JAMAIS lancer une synchronisation sans avoir mis N8N_ENCRYPTION_KEY a
+    # l'abri hors de Render : `generateValue` ne regenere la valeur que si elle
+    # est absente, mais si elle venait a disparaitre, une nouvelle clef serait
+    # fabriquee et les credentials stockes deviendraient definitivement illisibles.
     envVars:
-      # Generates a base64-encoded key for
-      # encrypting credentials in n8n
-      #
-      # Do not modify this value after it's generated!
-      # If you do, you'll lose access to all credentials
-      # encrypted with the previous value.
       - key: N8N_ENCRYPTION_KEY
         generateValue: true
 
-      # These automatically populate connection details 
-      # for the Render Postgres database defined below
       - key: DB_TYPE
         value: postgresdb
       - key: DB_POSTGRESDB_DATABASE
@@ -54,12 +74,10 @@ services:
 
 databases:
   - name: n8n-db
-    plan: free
-    # The free instance type is limited to 1 GB of disk
-    # space.
-    #
-    # If you later upgrade to a paid instance type, you can
-    # increase the disk size to any multiple of 5 GB by
-    # setting the `diskSizeGB` property.
-    #
-    # diskSizeGB: 5
+    region: oregon
+    # Cette base porte TOUT n8n : les workflows, les credentials, les executions.
+    # Le service web n'a aucun disque persistant, c'est normal et voulu.
+    # Le plan gratuit d'origine plafonnait a 1 Go et expire au bout de 30 jours,
+    # d'ou le passage a un plan payant.
+    plan: basic-256mb
+    diskSizeGB: 5
